@@ -26,11 +26,19 @@ static bool g_listInitialized = false;
 // ============================================================================
 
 static void wEui_list_adjustTopIndex(void) {
-    // Fixed cursor position scrolling - keep cursor at WEUI_FIXED_CURSOR_POS when possible
+    // Get actual visible lines from display configuration
+    uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
+
+    // Fixed cursor position scrolling - keep cursor at target position when possible
     uint8_t targetCursorPos = WEUI_FIXED_CURSOR_POS;
 
+    // Adjust target if actual visible lines is less than fixed position
+    if (targetCursorPos >= actualVisibleLines) {
+        targetCursorPos = actualVisibleLines / 2;  // Use middle position
+    }
+
     // If we have fewer items than visible lines, start from top
-    if (g_listManager.itemCount <= WEUI_VISIBLE_LINES) {
+    if (g_listManager.itemCount <= actualVisibleLines) {
         g_listManager.topIndex = 0;
         return;
     }
@@ -41,8 +49,8 @@ static void wEui_list_adjustTopIndex(void) {
     // Clamp to valid range
     if (idealTopIndex < 0) {
         g_listManager.topIndex = 0;
-    } else if (idealTopIndex > (int16_t)(g_listManager.itemCount - WEUI_VISIBLE_LINES)) {
-        g_listManager.topIndex = g_listManager.itemCount - WEUI_VISIBLE_LINES;
+    } else if (idealTopIndex > (int16_t)(g_listManager.itemCount - actualVisibleLines)) {
+        g_listManager.topIndex = g_listManager.itemCount - actualVisibleLines;
     } else {
         g_listManager.topIndex = idealTopIndex;
     }
@@ -102,11 +110,12 @@ bool wEui_list_removeLast(void) {
     }
 
     // Adjust top index
-    if (g_listManager.topIndex > 0 && g_listManager.itemCount <= WEUI_VISIBLE_LINES) {
+    uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
+    if (g_listManager.topIndex > 0 && g_listManager.itemCount <= actualVisibleLines) {
         g_listManager.topIndex = 0;
-    } else if (g_listManager.topIndex + WEUI_VISIBLE_LINES > g_listManager.itemCount) {
-        g_listManager.topIndex = (g_listManager.itemCount > WEUI_VISIBLE_LINES) ?
-                                 g_listManager.itemCount - WEUI_VISIBLE_LINES : 0;
+    } else if (g_listManager.topIndex + actualVisibleLines > g_listManager.itemCount) {
+        g_listManager.topIndex = (g_listManager.itemCount > actualVisibleLines) ?
+                                 g_listManager.itemCount - actualVisibleLines : 0;
     }
 
     if (g_listManager.mutex != NULL) {
@@ -234,7 +243,8 @@ void wEui_list_pageUp(void) {
     }
 
     if (g_listManager.itemCount > 0) {
-        int16_t newIndex = (int16_t)g_listManager.selectedIndex - WEUI_VISIBLE_LINES;
+        uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
+        int16_t newIndex = (int16_t)g_listManager.selectedIndex - actualVisibleLines;
         if (newIndex < 0) {
             newIndex = 0;
         }
@@ -253,7 +263,8 @@ void wEui_list_pageDown(void) {
     }
 
     if (g_listManager.itemCount > 0) {
-        uint8_t newIndex = g_listManager.selectedIndex + WEUI_VISIBLE_LINES;
+        uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
+        uint8_t newIndex = g_listManager.selectedIndex + actualVisibleLines;
         if (newIndex >= g_listManager.itemCount) {
             newIndex = g_listManager.itemCount - 1;
         }
@@ -372,5 +383,62 @@ uint8_t wEui_list_getCursorPosition(void) {
         xSemaphoreGive(g_listManager.mutex);
     }
     return cursorPos;
+}
+
+void wEui_list_renderScrollbar(U8G2 *display, uint8_t x, uint8_t y, uint8_t width, uint8_t height) {
+    if (display == NULL || height == 0) {
+        return;
+    }
+
+    // Get actual visible lines
+    uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
+
+    // Get list state with mutex protection
+    if (g_listManager.mutex != NULL) {
+        xSemaphoreTake(g_listManager.mutex, pdMS_TO_TICKS(10));
+    }
+
+    uint8_t itemCount = g_listManager.itemCount;
+    uint8_t topIndex = g_listManager.topIndex;
+
+    if (g_listManager.mutex != NULL) {
+        xSemaphoreGive(g_listManager.mutex);
+    }
+
+    // Only show scrollbar if there are more items than visible lines
+    if (itemCount <= actualVisibleLines) {
+        // Draw empty scrollbar track (thin line)
+        display->setDrawColor(1);
+        display->drawFrame(x, y, width, height);
+        return;
+    }
+
+    // Draw scrollbar track (background frame)
+    display->setDrawColor(1);
+    display->drawFrame(x, y, width, height);
+
+    // Calculate scrollbar thumb size and position
+    // Thumb height is proportional to visible items / total items
+    uint8_t trackHeight = height - 2;  // Account for frame
+    uint8_t thumbHeight = (trackHeight * actualVisibleLines) / itemCount;
+
+    // Ensure minimum thumb height
+    if (thumbHeight < WEUI_SCROLLBAR_MIN_HEIGHT) {
+        thumbHeight = WEUI_SCROLLBAR_MIN_HEIGHT;
+    }
+
+    // Calculate thumb position based on topIndex
+    // Maximum scroll range: itemCount - actualVisibleLines
+    uint8_t maxTopIndex = itemCount - actualVisibleLines;
+    uint8_t availableTrack = trackHeight - thumbHeight;
+    uint8_t thumbY = y + 1;  // Start after frame
+
+    if (maxTopIndex > 0) {
+        thumbY += (availableTrack * topIndex) / maxTopIndex;
+    }
+
+    // Draw scrollbar thumb (filled box)
+    display->setDrawColor(1);
+    display->drawBox(x + 1, thumbY, width - 2, thumbHeight);
 }
 

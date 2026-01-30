@@ -1,4 +1,5 @@
 #include "../include/wEui.h"
+#include "../include/wEui_statusbar.h"
 #include <string.h>
 
 /**
@@ -16,6 +17,7 @@ static wEui_DisplayConfig_t g_displayConfig = {0};
 static wEui_ButtonConfig_t g_buttonConfig = {0};
 static QueueHandle_t g_buttonQueue = NULL;
 static SemaphoreHandle_t g_listMutex = NULL;
+static uint8_t g_actualVisibleLines = WEUI_VISIBLE_LINES;  // Actual visible lines based on display height
 
 // Library version
 static const char* WEUI_VERSION = "1.0.0";
@@ -39,6 +41,12 @@ int wEui_init(const wEui_Config_t *config) {
     g_buttonConfig = config->buttonConfig;
     g_buttonQueue = config->buttonQueue;
     g_listMutex = config->listMutex;
+
+    // Initialize status bar module
+    if (wEui_statusBar_init() != 0) {
+        Serial.println("wEui: Status bar initialization failed!");
+        return -5;
+    }
 
     // Initialize display with proper error checking
     if (g_display != NULL) {
@@ -90,6 +98,10 @@ int wEui_deinit(void) {
     g_display = NULL;
     g_buttonQueue = NULL;
     g_listMutex = NULL;
+
+    // Clean up status bar module
+    wEui_statusBar_deinit();
+
     g_wEui_initialized = false;
 
     return 0;
@@ -125,98 +137,95 @@ int wEui_render(void) {
 
     // Get list state
     uint8_t itemCount = wEui_list_getItemCount();
-    uint8_t selectedIndex = wEui_list_getSelectedIndex();
     uint8_t topIndex = wEui_list_getTopIndex();
     uint8_t cursorPos = wEui_list_getCursorPosition();
+
+    // Status bar is always enabled, reserve space for it
+    uint8_t statusBarHeight = wEui_statusBar_getHeight();
+    uint8_t contentMaxHeight = g_displayConfig.height - statusBarHeight;
+
+    // Calculate actual visible lines based on content height
+    // Account for border (4 pixels total: 2 top + 2 bottom)
+    uint8_t availableContentHeight = contentMaxHeight - 4;
+    g_actualVisibleLines = availableContentHeight / g_displayConfig.lineHeight;
+
+    // Ensure at least 1 line is visible and not more than WEUI_VISIBLE_LINES
+    if (g_actualVisibleLines == 0) {
+        g_actualVisibleLines = 1;
+    }
+    if (g_actualVisibleLines > WEUI_VISIBLE_LINES) {
+        g_actualVisibleLines = WEUI_VISIBLE_LINES;
+    }
 
     if (itemCount == 0) {
         // Show empty list message
         g_display->setDrawColor(1);
         g_display->drawStr((g_displayConfig.width - 60) / 2,
-                          (g_displayConfig.height - g_displayConfig.lineHeight) / 2,
+                          (contentMaxHeight - g_displayConfig.lineHeight) / 2,
                           "No items");
-        return 0;
-    }
+    } else {
+        // Calculate scrollbar area
+        uint8_t scrollbarX = g_displayConfig.width - WEUI_SCROLLBAR_WIDTH;
+        uint8_t contentAreaWidth = g_displayConfig.width - WEUI_SCROLLBAR_WIDTH - 2;
 
-    // Draw list border/frame
-    g_display->setDrawColor(1);
-    g_display->drawFrame(0, 0, g_displayConfig.width - 8, g_displayConfig.height);
+        // Draw list border/frame (excluding scrollbar area)
+        g_display->setDrawColor(1);
+        g_display->drawFrame(0, 0, contentAreaWidth, contentMaxHeight);
 
-    // Calculate content area
-    uint8_t contentX = 2;
-    uint8_t contentY = 2;
-    uint8_t contentWidth = g_displayConfig.width - 12;
+        // Draw scrollbar
+        wEui_list_renderScrollbar(g_display, scrollbarX, 0, WEUI_SCROLLBAR_WIDTH, contentMaxHeight);
 
-    // Render list items with enhanced visuals
-    for (uint8_t i = 0; i < WEUI_VISIBLE_LINES && (topIndex + i) < itemCount; i++) {
-        uint8_t itemIndex = topIndex + i;
-        uint8_t yPos = contentY + (i * g_displayConfig.lineHeight);
+        // Calculate content area
+        uint8_t contentX = 2;
+        uint8_t contentY = 2;
+        uint8_t contentWidth = contentAreaWidth - 4;
 
-        // Check if this is the selected item
-        bool isSelected = (i == cursorPos);
+        // Use actual visible lines calculated above
+        uint8_t maxVisibleItems = g_actualVisibleLines;
 
-        if (isSelected) {
-            // Draw selection background box
+        // Render list items with enhanced visuals
+        for (uint8_t i = 0; i < maxVisibleItems && (topIndex + i) < itemCount; i++) {
+            uint8_t itemIndex = topIndex + i;
+            uint8_t yPos = contentY + (i * g_displayConfig.lineHeight);
+
+            // Ensure we don't draw beyond content area
+            if (yPos + g_displayConfig.lineHeight > contentMaxHeight - 2) {
+                break;
+            }
+
+            // Check if this is the selected item
+            bool isSelected = (i == cursorPos);
+
+            if (isSelected) {
+                // Draw selection background box
+                g_display->setDrawColor(1);
+                g_display->drawBox(contentX, yPos - 1,
+                                  contentWidth, g_displayConfig.lineHeight);
+
+                // Switch to inverse color for selected item text
+                g_display->setDrawColor(0);
+
+                // Draw selection arrow/indicator
+                g_display->drawStr(contentX + 1, yPos, ">");
+            } else {
+                // Normal item - ensure normal drawing color
+                g_display->setDrawColor(1);
+                g_display->drawStr(contentX + 1, yPos, " ");
+            }
+
+            // Draw item name with proper offset
+            const char* itemName = wEui_list_getItemName(itemIndex);
+            if (itemName && strlen(itemName) > 0) {
+                g_display->drawStr(contentX + 8, yPos, itemName);
+            }
+
+            // Reset draw color for next iteration
             g_display->setDrawColor(1);
-            g_display->drawBox(contentX, yPos - 1,
-                              contentWidth, g_displayConfig.lineHeight);
-
-            // Switch to inverse color for selected item text
-            g_display->setDrawColor(0);
-
-            // Draw selection arrow/indicator
-            g_display->drawStr(contentX + 1, yPos, ">");
-        } else {
-            // Normal item - ensure normal drawing color
-            g_display->setDrawColor(1);
-            g_display->drawStr(contentX + 1, yPos, " ");
         }
-
-        // Draw item name with proper offset
-        const char* itemName = wEui_list_getItemName(itemIndex);
-        if (itemName && strlen(itemName) > 0) {
-            g_display->drawStr(contentX + 8, yPos, itemName);
-        }
-
-        // Reset draw color for next iteration
-        g_display->setDrawColor(1);
     }
 
-    // Draw enhanced scrollbar if needed
-    if (itemCount > WEUI_VISIBLE_LINES) {
-        uint8_t scrollBarX = g_displayConfig.width - 6;
-        uint8_t scrollBarY = 2;
-        uint8_t scrollBarMaxHeight = g_displayConfig.height - 4;
-
-        // Calculate scrollbar dimensions
-        uint8_t scrollBarHeight = (WEUI_VISIBLE_LINES * scrollBarMaxHeight) / itemCount;
-        if (scrollBarHeight < 4) scrollBarHeight = 4; // Minimum height
-
-        uint8_t scrollBarPos = scrollBarY +
-                              (topIndex * (scrollBarMaxHeight - scrollBarHeight)) /
-                              (itemCount - WEUI_VISIBLE_LINES);
-
-        // Draw scrollbar background
-        g_display->setDrawColor(1);
-        g_display->drawFrame(scrollBarX, scrollBarY, 3, scrollBarMaxHeight);
-
-        // Draw scrollbar thumb
-        g_display->drawBox(scrollBarX + 1, scrollBarPos, 1, scrollBarHeight);
-    }
-
-    // Draw list status info (item counter)
-    if (itemCount > 0) {
-        char statusStr[16];
-        snprintf(statusStr, sizeof(statusStr), "%d/%d", selectedIndex + 1, itemCount);
-
-        // Position status at bottom right
-        uint8_t statusX = g_displayConfig.width -
-                         (strlen(statusStr) * 6) - 2; // Approximate character width
-        uint8_t statusY = g_displayConfig.height - g_displayConfig.lineHeight + 2;
-
-        g_display->setDrawColor(1);
-        g_display->drawStr(statusX, statusY, statusStr);
-    }
+    // Always render status bar at bottom
+    wEui_statusBar_render(g_display, &g_displayConfig);
 
     return 0;
 }
@@ -296,3 +305,8 @@ void wEui_setFont(const uint8_t *font) {
         g_displayConfig.font = font;
     }
 }
+
+uint8_t wEui_list_getActualVisibleLines(void) {
+    return g_actualVisibleLines;
+}
+

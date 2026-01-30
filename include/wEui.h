@@ -30,9 +30,26 @@
 #define WEUI_FIXED_CURSOR_POS 2  // Fixed cursor position (0-based, middle of visible lines)
 #define WEUI_SCROLL_MARGIN 1     // Lines to keep above/below cursor when possible
 
+// Scrollbar configuration
+#define WEUI_SCROLLBAR_WIDTH 6   // Width of the scrollbar in pixels
+#define WEUI_SCROLLBAR_MIN_HEIGHT 4  // Minimum height of scrollbar thumb
+
 // ============================================================================
 // Type Definitions
 // ============================================================================
+
+/**
+ * @brief Display configuration structure
+ */
+typedef struct {
+    uint8_t width;
+    uint8_t height;
+    uint8_t lineHeight;
+    const uint8_t *font;
+} wEui_DisplayConfig_t;
+
+// Include statusbar header after DisplayConfig is defined
+#include "wEui_statusbar.h"
 
 /**
  * @brief Button types supported by wEui
@@ -65,15 +82,6 @@ typedef struct {
     wEui_ItemCallback_t onClicked;
 } wEui_ListItem_t;
 
-/**
- * @brief Display configuration structure
- */
-typedef struct {
-    uint8_t width;
-    uint8_t height;
-    uint8_t lineHeight;
-    const uint8_t *font;
-} wEui_DisplayConfig_t;
 
 /**
  * @brief Button pin configuration structure
@@ -225,6 +233,22 @@ uint8_t wEui_list_getTopIndex(void);
  */
 uint8_t wEui_list_getCursorPosition(void);
 
+/**
+ * @brief Get actual visible lines count based on available display height
+ * @return Number of lines that can actually be displayed
+ */
+uint8_t wEui_list_getActualVisibleLines(void);
+
+/**
+ * @brief Render the scrollbar for the list
+ * @param display U8G2 display pointer
+ * @param x X position of scrollbar
+ * @param y Y position of scrollbar area
+ * @param width Width of scrollbar
+ * @param height Height of scrollbar area
+ */
+void wEui_list_renderScrollbar(U8G2 *display, uint8_t x, uint8_t y, uint8_t width, uint8_t height);
+
 // ============================================================================
 // Button Management Functions
 // ============================================================================
@@ -338,5 +362,33 @@ const wEui_DisplayConfig_t* wEui_getDisplayConfig(void);
  * @param font Font to use
  */
 void wEui_setFont(const uint8_t *font);
+
+// ============================================================================
+// Status Bar Functions
+// ============================================================================
+
+/**
+ * @brief Set status bar text
+ * @param text Text to display in status bar
+ */
+void wEui_statusBar_setText(const char *text);
+
+/**
+ * @brief Get current status bar text
+ * @return Pointer to status bar text
+ */
+const char* wEui_statusBar_getText(void);
+
+/**
+ * @brief Set status bar border visibility
+ * @param showBorder Show border (true) or not (false)
+ */
+void wEui_statusBar_setShowBorder(bool showBorder);
+
+/**
+ * @brief Get status bar border visibility
+ * @return true if border is shown, false otherwise
+ */
+bool wEui_statusBar_getShowBorder(void);
 
 #endif // WEUI_H
