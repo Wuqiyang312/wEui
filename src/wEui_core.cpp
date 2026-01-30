@@ -56,17 +56,23 @@ int wEui_init(const wEui_Config_t *config) {
             return -4;
         }
 
+        // Enable UTF-8 mode for Chinese characters
+        g_display->enableUTF8Print();
+
         // Set display properties
         g_display->setFont(g_displayConfig.font);
         g_display->setFontRefHeightExtendedText();
         g_display->setDrawColor(1);
         g_display->setFontPosTop();
+        g_display->setFontDirection(0);
         g_display->clearBuffer();
 
         // Test display by sending buffer
         g_display->sendBuffer();
 
         Serial.println("wEui: Display initialized successfully");
+        Serial.print("wEui: Font configured: ");
+        Serial.println((g_displayConfig.font != NULL) ? "OK" : "NULL");
     } else {
         Serial.println("wEui: Warning - No display configured");
     }
@@ -115,12 +121,13 @@ int wEui_begin(void) {
     // Clear display and show initialization message
     g_display->clearBuffer();
     g_display->setDrawColor(1);
+    g_display->setFont(g_displayConfig.font);
 
-    // Draw startup screen
-    g_display->drawStr(0, 0, "wEui v1.0.0");
-    g_display->drawStr(0, 12, "Initializing...");
-    g_display->drawStr(0, 36, "Display: OK");
-    g_display->drawStr(0, 48, "Ready!");
+    // Draw startup screen using print for UTF-8 support
+    g_display->setCursor(0, 0);
+    g_display->print("wEui v1.0.0");
+    g_display->setCursor(0, 16);
+    g_display->print("就绪!");
 
     g_display->sendBuffer();
 
@@ -158,11 +165,14 @@ int wEui_render(void) {
     }
 
     if (itemCount == 0) {
-        // Show empty list message
+        // Show empty list message in Chinese
         g_display->setDrawColor(1);
-        g_display->drawStr((g_displayConfig.width - 60) / 2,
-                          (contentMaxHeight - g_displayConfig.lineHeight) / 2,
-                          "No items");
+        g_display->setFont(g_displayConfig.font);  // Ensure font is set
+        const char* emptyMsg = "空";
+        int msgWidth = g_display->getStrWidth(emptyMsg);
+        g_display->setCursor((g_displayConfig.width - msgWidth) / 2,
+                          (contentMaxHeight - g_displayConfig.lineHeight) / 2);
+        g_display->print(emptyMsg);
     } else {
         // Calculate scrollbar area
         uint8_t scrollbarX = g_displayConfig.width - WEUI_SCROLLBAR_WIDTH;
@@ -179,6 +189,9 @@ int wEui_render(void) {
         uint8_t contentX = 2;
         uint8_t contentY = 2;
         uint8_t contentWidth = contentAreaWidth - 4;
+
+        // Ensure font is set for text rendering
+        g_display->setFont(g_displayConfig.font);
 
         // Use actual visible lines calculated above
         uint8_t maxVisibleItems = g_actualVisibleLines;
@@ -206,17 +219,18 @@ int wEui_render(void) {
                 g_display->setDrawColor(0);
 
                 // Draw selection arrow/indicator
-                g_display->drawStr(contentX + 1, yPos, ">");
+                g_display->setCursor(contentX + 1, yPos);
+                g_display->print(">");
             } else {
                 // Normal item - ensure normal drawing color
                 g_display->setDrawColor(1);
-                g_display->drawStr(contentX + 1, yPos, " ");
             }
 
             // Draw item name with proper offset
             const char* itemName = wEui_list_getItemName(itemIndex);
             if (itemName && strlen(itemName) > 0) {
-                g_display->drawStr(contentX + 8, yPos, itemName);
+                g_display->setCursor(contentX + 8, yPos);
+                g_display->print(itemName);
             }
 
             // Reset draw color for next iteration

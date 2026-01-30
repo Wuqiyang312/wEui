@@ -14,6 +14,7 @@ int wEui_statusBar_init(void) {
     }
     g_statusBar.showBorder = true;
     memset(g_statusBar.text, 0, WEUI_STATUS_BAR_LENGTH);
+    g_statusBar.customRenderCallback = NULL;
     g_statusBar_initialized = true;
     return 0;
 }
@@ -85,12 +86,42 @@ bool wEui_statusBar_getShowBorder(void) {
 uint8_t wEui_statusBar_getHeight(void) {
     return WEUI_STATUS_BAR_HEIGHT;
 }
+void wEui_statusBar_setCustomRender(wEui_StatusBarRenderCallback_t callback) {
+    if (!g_statusBar_initialized) {
+        return;
+    }
+    if (g_statusBarMutex != NULL) {
+        xSemaphoreTake(g_statusBarMutex, portMAX_DELAY);
+    }
+    g_statusBar.customRenderCallback = callback;
+    if (g_statusBarMutex != NULL) {
+        xSemaphoreGive(g_statusBarMutex);
+    }
+}
 void wEui_statusBar_render(U8G2 *display, const wEui_DisplayConfig_t *displayConfig) {
     if (!g_statusBar_initialized || display == NULL || displayConfig == NULL) {
         return;
     }
     uint8_t statusBarY = displayConfig->height - WEUI_STATUS_BAR_HEIGHT;
     display->setDrawColor(1);
+
+    // Check if custom render callback is set
+    wEui_StatusBarRenderCallback_t customCallback = NULL;
+    if (g_statusBarMutex != NULL) {
+        xSemaphoreTake(g_statusBarMutex, pdMS_TO_TICKS(10));
+    }
+    customCallback = g_statusBar.customRenderCallback;
+    if (g_statusBarMutex != NULL) {
+        xSemaphoreGive(g_statusBarMutex);
+    }
+
+    // If custom callback is set, use it instead of default rendering
+    if (customCallback != NULL) {
+        customCallback(display, displayConfig, statusBarY);
+        return;
+    }
+
+    // Default rendering
     bool showBorder = false;
     if (g_statusBarMutex != NULL) {
         xSemaphoreTake(g_statusBarMutex, pdMS_TO_TICKS(10));

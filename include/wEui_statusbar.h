@@ -29,11 +29,20 @@
 // ============================================================================
 
 /**
+ * @brief Custom status bar render callback function type
+ * @param display Pointer to U8G2 display object
+ * @param displayConfig Display configuration
+ * @param statusBarY Y coordinate where status bar starts
+ */
+typedef void (*wEui_StatusBarRenderCallback_t)(U8G2 *display, const wEui_DisplayConfig_t *displayConfig, uint8_t statusBarY);
+
+/**
  * @brief Status bar configuration structure
  */
 typedef struct {
     bool showBorder;
     char text[WEUI_STATUS_BAR_LENGTH];
+    wEui_StatusBarRenderCallback_t customRenderCallback;
 } wEui_StatusBar_t;
 
 // Note: wEui_DisplayConfig_t must be defined before including this header
@@ -82,6 +91,12 @@ bool wEui_statusBar_getShowBorder(void);
  * @return Status bar height in pixels
  */
 uint8_t wEui_statusBar_getHeight(void);
+
+/**
+ * @brief Set custom status bar render callback
+ * @param callback Custom render callback function (NULL to use default rendering)
+ */
+void wEui_statusBar_setCustomRender(wEui_StatusBarRenderCallback_t callback);
 
 /**
  * @brief Render the status bar
