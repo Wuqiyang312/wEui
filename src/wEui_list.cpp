@@ -10,6 +10,7 @@
 // Internal Variables
 // ============================================================================
 
+// 列表缓冲与状态数据
 typedef struct {
     wEui_ListItem_t items[WEUI_MAX_ITEMS];
     uint8_t itemCount;
@@ -26,27 +27,27 @@ static bool g_listInitialized = false;
 // ============================================================================
 
 static void wEui_list_adjustTopIndex(void) {
-    // Get actual visible lines from display configuration
+    // 获取当前可见行
     uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
 
-    // Fixed cursor position scrolling - keep cursor at target position when possible
+    // 固定光标位置，尽量保持选中项在屏幕中间
     uint8_t targetCursorPos = WEUI_FIXED_CURSOR_POS;
 
-    // Adjust target if actual visible lines is less than fixed position
+    // 如果实际可见行数不足，就在中间显示选中项
     if (targetCursorPos >= actualVisibleLines) {
         targetCursorPos = actualVisibleLines / 2;  // Use middle position
     }
 
-    // If we have fewer items than visible lines, start from top
+    // 如果条目数少于可见行数，从顶部开始
     if (g_listManager.itemCount <= actualVisibleLines) {
         g_listManager.topIndex = 0;
         return;
     }
 
-    // Calculate ideal top index to keep cursor at fixed position
+    // 计算理想的顶部索引以保持光标在固定位置
     int16_t idealTopIndex = g_listManager.selectedIndex - targetCursorPos;
 
-    // Clamp to valid range
+    // 限制在有效范围内
     if (idealTopIndex < 0) {
         g_listManager.topIndex = 0;
     } else if (idealTopIndex > (int16_t)(g_listManager.itemCount - actualVisibleLines)) {
@@ -65,6 +66,7 @@ void wEui_list_init(SemaphoreHandle_t mutex) {
         return;
     }
 
+    // 重置列表状态并存储互斥量
     memset(&g_listManager, 0, sizeof(g_listManager));
     g_listManager.mutex = mutex;
     g_listInitialized = true;
@@ -79,6 +81,7 @@ bool wEui_list_addItem(const char *itemName, wEui_ItemCallback_t callback) {
         xSemaphoreTake(g_listManager.mutex, portMAX_DELAY);
     }
 
+    // 写入条目信息并递增计数
     strncpy(g_listManager.items[g_listManager.itemCount].name, itemName,
             WEUI_ITEM_NAME_LENGTH - 1);
     g_listManager.items[g_listManager.itemCount].name[WEUI_ITEM_NAME_LENGTH - 1] = '\0';
@@ -101,15 +104,16 @@ bool wEui_list_removeLast(void) {
         xSemaphoreTake(g_listManager.mutex, portMAX_DELAY);
     }
 
+    // 删除最后一个条目并处理索引回退
     g_listManager.itemCount--;
     memset(&g_listManager.items[g_listManager.itemCount], 0, sizeof(wEui_ListItem_t));
 
-    // Adjust selected index if necessary
+    // 调整选中索引
     if (g_listManager.selectedIndex >= g_listManager.itemCount && g_listManager.itemCount > 0) {
         g_listManager.selectedIndex = g_listManager.itemCount - 1;
     }
 
-    // Adjust top index
+    // 调整顶部索引
     uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
     if (g_listManager.topIndex > 0 && g_listManager.itemCount <= actualVisibleLines) {
         g_listManager.topIndex = 0;
@@ -130,6 +134,7 @@ void wEui_list_clear(void) {
         xSemaphoreTake(g_listManager.mutex, portMAX_DELAY);
     }
 
+    // 清理所有条目并重置游标
     memset(g_listManager.items, 0, sizeof(g_listManager.items));
     g_listManager.itemCount = 0;
     g_listManager.topIndex = 0;
@@ -390,10 +395,10 @@ void wEui_list_renderScrollbar(U8G2 *display, uint8_t x, uint8_t y, uint8_t widt
         return;
     }
 
-    // Get actual visible lines
+    // 只有行数超过可见才绘制滑块
     uint8_t actualVisibleLines = wEui_list_getActualVisibleLines();
 
-    // Get list state with mutex protection
+    // 获取列表状态
     if (g_listManager.mutex != NULL) {
         xSemaphoreTake(g_listManager.mutex, pdMS_TO_TICKS(10));
     }
@@ -405,30 +410,30 @@ void wEui_list_renderScrollbar(U8G2 *display, uint8_t x, uint8_t y, uint8_t widt
         xSemaphoreGive(g_listManager.mutex);
     }
 
-    // Only show scrollbar if there are more items than visible lines
+    // 只有在条目数超过可见行数时才显示滚动条
     if (itemCount <= actualVisibleLines) {
-        // Draw empty scrollbar track (thin line)
+        // 绘制空白轨道作为视觉提示
         display->setDrawColor(1);
         display->drawFrame(x, y, width, height);
         return;
     }
 
-    // Draw scrollbar track (background frame)
+    // 绘制轨道与滑块
     display->setDrawColor(1);
     display->drawFrame(x, y, width, height);
 
-    // Calculate scrollbar thumb size and position
-    // Thumb height is proportional to visible items / total items
+    // 计算滑块的大小和位置
+    // 滑块高度与可见条目数/总条目数成比例
     uint8_t trackHeight = height - 2;  // Account for frame
     uint8_t thumbHeight = (trackHeight * actualVisibleLines) / itemCount;
 
-    // Ensure minimum thumb height
+    // 确保滑块有最小高度
     if (thumbHeight < WEUI_SCROLLBAR_MIN_HEIGHT) {
         thumbHeight = WEUI_SCROLLBAR_MIN_HEIGHT;
     }
 
-    // Calculate thumb position based on topIndex
-    // Maximum scroll range: itemCount - actualVisibleLines
+    // 根据顶部索引计算滑块位置
+    // 最大滚动范围：itemCount - actualVisibleLines
     uint8_t maxTopIndex = itemCount - actualVisibleLines;
     uint8_t availableTrack = trackHeight - thumbHeight;
     uint8_t thumbY = y + 1;  // Start after frame
@@ -437,7 +442,7 @@ void wEui_list_renderScrollbar(U8G2 *display, uint8_t x, uint8_t y, uint8_t widt
         thumbY += (availableTrack * topIndex) / maxTopIndex;
     }
 
-    // Draw scrollbar thumb (filled box)
+    // 绘制滑块（填充的矩形）
     display->setDrawColor(1);
     display->drawBox(x + 1, thumbY, width - 2, thumbHeight);
 }

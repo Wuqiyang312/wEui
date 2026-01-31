@@ -11,15 +11,18 @@
 
 // Button pin mapping
 static uint8_t g_buttonPins[WEUI_BUTTON_COUNT] = {0};
+// 按键编号到 GPIO 的映射表
 
 // Button last states for edge detection
 static uint8_t g_buttonLastStates[WEUI_BUTTON_COUNT] = {1, 1, 1, 1};
+// 上一次的电平状态，用于抓取下降沿按下事件
 
 // Button event callbacks
 static wEui_ButtonCallback_t g_buttonCallbacks[WEUI_BUTTON_COUNT] = {NULL};
 
 // Button queue for event messaging
 static QueueHandle_t g_buttonQueue = NULL;
+// 事件队列供默认处理器向上层传递按键事件
 
 // Initialization flag
 static bool g_buttonInitialized = false;
@@ -34,6 +37,7 @@ static bool g_buttonInitialized = false;
  * @return Pin state (0 or 1)
  */
 static inline uint8_t wEui_button_readGpio(uint8_t pin) {
+    // 直接读取对应的 GPIO 电平
     return digitalRead(pin);
 }
 
@@ -44,7 +48,7 @@ static inline uint8_t wEui_button_readGpio(uint8_t pin) {
 static void wEui_button_defaultHandler(wEui_ButtonType_t button) {
     const char* btnName = NULL;
 
-    // Convert button type to string
+    // 将按键类型转换为字符串并打印
     switch (button) {
         case WEUI_BUTTON_UP:
             btnName = "UP";
@@ -66,7 +70,7 @@ static void wEui_button_defaultHandler(wEui_ButtonType_t button) {
             return;
     }
 
-    // Send event to queue if available
+    // 将事件推送到队列供 wEui_core 处理
     if (btnName != NULL && g_buttonQueue != NULL) {
         xQueueSend(g_buttonQueue, &btnName, 0);
     }
@@ -84,7 +88,7 @@ int wEui_button_init(void) {
     // Note: Pin configuration should be set via wEui_button_setPinConfig
     // before calling this function
 
-    // Configure GPIO pins as input with pull-up
+    // 配置 GPIO 输入并默认标记为未按下
     for (int i = 0; i < WEUI_BUTTON_COUNT; i++) {
         if (g_buttonPins[i] != 0) { // 0 means pin not configured
             pinMode(g_buttonPins[i], INPUT_PULLUP);
@@ -142,6 +146,7 @@ int wEui_button_scan(void) {
         return -1;
     }
 
+    // 轮询所有已配置按键，检测按下边沿
     for (int i = 0; i < WEUI_BUTTON_COUNT; i++) {
         if (g_buttonPins[i] == 0) {
             continue; // Pin not configured
@@ -176,6 +181,7 @@ uint8_t wEui_button_read(wEui_ButtonType_t button) {
 // ============================================================================
 
 void wEui_button_setButtonQueue(QueueHandle_t queue) {
+    // 保存事件队列指针供默认处理器使用
     g_buttonQueue = queue;
 }
 

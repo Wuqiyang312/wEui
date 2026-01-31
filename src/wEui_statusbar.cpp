@@ -2,12 +2,15 @@
 #include <string.h>
 
 static wEui_StatusBar_t g_statusBar = {0};
+// 全局状态栏数据
 static SemaphoreHandle_t g_statusBarMutex = NULL;
+// 保护状态栏读写的互斥量
 static bool g_statusBar_initialized = false;
 int wEui_statusBar_init(void) {
     if (g_statusBar_initialized) {
         return 0;
     }
+    // 创建互斥量保证多线程安全
     g_statusBarMutex = xSemaphoreCreateMutex();
     if (g_statusBarMutex == NULL) {
         return -1;
@@ -36,6 +39,7 @@ void wEui_statusBar_setText(const char *text) {
     if (g_statusBarMutex != NULL) {
         xSemaphoreTake(g_statusBarMutex, portMAX_DELAY);
     }
+    // 线程安全地更新状态栏文本
     strncpy(g_statusBar.text, text, WEUI_STATUS_BAR_LENGTH - 1);
     g_statusBar.text[WEUI_STATUS_BAR_LENGTH - 1] = '\0';
     if (g_statusBarMutex != NULL) {
@@ -117,6 +121,7 @@ void wEui_statusBar_render(U8G2 *display, const wEui_DisplayConfig_t *displayCon
 
     // If custom callback is set, use it instead of default rendering
     if (customCallback != NULL) {
+        // 支持自定义状态栏渲染
         customCallback(display, displayConfig, statusBarY);
         return;
     }

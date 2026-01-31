@@ -22,21 +22,33 @@
 // Configuration Constants
 // ============================================================================
 
-#define WEUI_MAX_ITEMS 20
-#define WEUI_VISIBLE_LINES 5
-#define WEUI_ITEM_NAME_LENGTH 32
-#define WEUI_LINE_HEIGHT 12
-#define WEUI_DEFAULT_FONT u8g2_font_6x10_tf
-#define WEUI_FIXED_CURSOR_POS 2  // Fixed cursor position (0-based, middle of visible lines)
-#define WEUI_SCROLL_MARGIN 1     // Lines to keep above/below cursor when possible
+#define WEUI_MAX_ITEMS 20 // 列表支持的最大条目数
+#define WEUI_VISIBLE_LINES 5 // 屏幕上可见的行数（近似）
+#define WEUI_ITEM_NAME_LENGTH 32 // 条目名称的最大长度
+#define WEUI_LINE_HEIGHT 12 // 每行的像素高度
+#define WEUI_DEFAULT_FONT u8g2_font_6x10_tf // 默认使用的字体
+#define WEUI_FIXED_CURSOR_POS 2  // 固定光标位置（0 基，位于可见行中间）
+#define WEUI_SCROLL_MARGIN 1     // 上下保留的最小行距，防止光标贴边
 
 // Scrollbar configuration
-#define WEUI_SCROLLBAR_WIDTH 6   // Width of the scrollbar in pixels
-#define WEUI_SCROLLBAR_MIN_HEIGHT 4  // Minimum height of scrollbar thumb
+#define WEUI_SCROLLBAR_WIDTH 6   // 滚动条的像素宽度
+#define WEUI_SCROLLBAR_MIN_HEIGHT 4  // 滚动条滑块高度的最小值
+
+// Page management configuration
+#define WEUI_MAX_PAGES 10        // 支持的最大页面堆栈深度
+#define WEUI_PAGE_NAME_LENGTH 32 // 页面名称的最大长度
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
+
+/**
+ * @brief Page types supported by wEui
+ */
+typedef enum {
+    WEUI_PAGE_TYPE_LIST = 0,     // 列表页面类型
+    WEUI_PAGE_TYPE_CUSTOM        // 自定义页面类型
+} wEui_PageType_t;
 
 /**
  * @brief Display configuration structure
@@ -47,6 +59,33 @@ typedef struct {
     uint8_t lineHeight;
     const uint8_t *font;
 } wEui_DisplayConfig_t;
+
+/**
+ * @brief Custom page render callback function type
+ * @param display U8G2 display pointer
+ * @param displayConfig Display configuration
+ * @param contentHeight Available content height (excluding status bar)
+ */
+typedef void (*wEui_CustomPageRender_t)(U8G2 *display, const wEui_DisplayConfig_t *displayConfig, uint8_t contentHeight);
+
+/**
+ * @brief Page structure
+ */
+typedef struct {
+    char name[WEUI_PAGE_NAME_LENGTH];
+    wEui_PageType_t type;
+    union {
+        struct {
+            // List page specific data is managed globally for now
+            // Future enhancement could move list data here
+            uint8_t reserved;
+        } listPage;
+        struct {
+            wEui_CustomPageRender_t renderCallback;
+        } customPage;
+    } data;
+    bool visible;  // 页面是否可见
+} wEui_Page_t;
 
 // Include statusbar header after DisplayConfig is defined
 #include "wEui_statusbar.h"
@@ -138,6 +177,77 @@ int wEui_render(void);
  * @return 0 on success, negative on error
  */
 int wEui_update(void);
+
+// ============================================================================
+// Page Management Functions
+// ============================================================================
+
+/**
+ * @brief Initialize page management system
+ * @return 0 on success, negative on error
+ */
+int wEui_page_init(void);
+
+/**
+ * @brief Create a new list page
+ * @param pageName Name of the page
+ * @return Page ID on success, negative on error
+ */
+int wEui_page_createList(const char *pageName);
+
+/**
+ * @brief Create a new custom page with render callback
+ * @param pageName Name of the page
+ * @param renderCallback Custom render function
+ * @return Page ID on success, negative on error
+ */
+int wEui_page_createCustom(const char *pageName, wEui_CustomPageRender_t renderCallback);
+
+/**
+ * @brief Push a page onto the stack (makes it visible)
+ * @param pageId Page ID to push
+ * @return 0 on success, negative on error
+ */
+int wEui_page_push(int pageId);
+
+/**
+ * @brief Pop the current page from stack
+ * @return 0 on success, negative on error
+ */
+int wEui_page_pop(void);
+
+/**
+ * @brief Get current active page ID
+ * @return Current page ID, negative if no page active
+ */
+int wEui_page_getCurrentId(void);
+
+/**
+ * @brief Get page type by page ID
+ * @param pageId Page ID
+ * @return Page type
+ */
+wEui_PageType_t wEui_page_getType(int pageId);
+
+/**
+ * @brief Get page name by page ID
+ * @param pageId Page ID
+ * @return Pointer to page name, NULL on error
+ */
+const char* wEui_page_getName(int pageId);
+
+/**
+ * @brief Get stack depth (number of pages in stack)
+ * @return Stack depth
+ */
+uint8_t wEui_page_getStackDepth(void);
+
+/**
+ * @brief Switch current list context to specific page (for list pages only)
+ * @param pageId Page ID
+ * @return 0 on success, negative on error
+ */
+int wEui_page_switchListContext(int pageId);
 
 // ============================================================================
 // List Management Functions
@@ -362,6 +472,28 @@ const wEui_DisplayConfig_t* wEui_getDisplayConfig(void);
  * @param font Font to use
  */
 void wEui_setFont(const uint8_t *font);
+
+// ============================================================================
+// Internal Page Rendering Functions (for library internal use)
+// ============================================================================
+
+/**
+ * @brief Get current page render information
+ * @param currentPageId Output current page ID
+ * @param pageType Output page type
+ * @return 0 on success, negative on error
+ */
+int wEui_page_getCurrentRenderInfo(int *currentPageId, wEui_PageType_t *pageType);
+
+/**
+ * @brief Render custom page
+ * @param pageId Page ID
+ * @param display U8G2 display pointer
+ * @param displayConfig Display configuration
+ * @param contentHeight Available content height
+ * @return 0 on success, negative on error
+ */
+int wEui_page_renderCustom(int pageId, U8G2 *display, const wEui_DisplayConfig_t *displayConfig, uint8_t contentHeight);
 
 // ============================================================================
 // Status Bar Functions

@@ -11,16 +11,28 @@
 // Internal Variables
 // ============================================================================
 
+// 模块级状态用于跟踪初始化、显示和按键资源
 static bool g_wEui_initialized = false;
 static U8G2 *g_display = NULL;
 static wEui_DisplayConfig_t g_displayConfig = {0};
 static wEui_ButtonConfig_t g_buttonConfig = {0};
 static QueueHandle_t g_buttonQueue = NULL;
 static SemaphoreHandle_t g_listMutex = NULL;
+// 当前根据显示高度计算出来的可见行数
 static uint8_t g_actualVisibleLines = WEUI_VISIBLE_LINES;  // Actual visible lines based on display height
 
 // Library version
 static const char* WEUI_VERSION = "1.0.0";
+
+// ============================================================================
+// Internal Functions
+// ============================================================================
+
+/**
+ * @brief 渲染列表页面内容
+ * @param contentMaxHeight 内容区域最大高度
+ */
+static void wEui_render_listPage(uint8_t contentMaxHeight);
 
 // ============================================================================
 // Core Functions Implementation
@@ -35,20 +47,26 @@ int wEui_init(const wEui_Config_t *config) {
         return 0; // Already initialized
     }
 
-    // Store configuration
+    // 记住传入的显示/按键/列表互斥配置以供后续使用
     g_display = config->display;
     g_displayConfig = config->displayConfig;
     g_buttonConfig = config->buttonConfig;
     g_buttonQueue = config->buttonQueue;
     g_listMutex = config->listMutex;
 
-    // Initialize status bar module
+    // 确保状态栏模块提前初始化
     if (wEui_statusBar_init() != 0) {
         Serial.println("wEui: Status bar initialization failed!");
         return -5;
     }
 
-    // Initialize display with proper error checking
+    // 初始化页面管理系统
+    if (wEui_page_init() != 0) {
+        Serial.println("wEui: Page management initialization failed!");
+        return -6;
+    }
+
+    // 初始化显示设备并开启 UTF-8 中文输出
     if (g_display != NULL) {
         // Initialize display hardware
         if (!g_display->begin()) {
@@ -77,7 +95,7 @@ int wEui_init(const wEui_Config_t *config) {
         Serial.println("wEui: Warning - No display configured");
     }
 
-    // Set button pin configuration
+    // 配置按键引脚与事件队列并启动按键模块
     if (wEui_button_setPinConfig(&g_buttonConfig) != 0) {
         return -2;
     }
@@ -135,6 +153,77 @@ int wEui_begin(void) {
     return 0;
 }
 
+/**
+ * @brief 渲染列表页面内容
+ * @param contentMaxHeight 内容区域最大高度
+ */
+static void wEui_render_listPage(uint8_t contentMaxHeight) {
+    // 获取列表状态用于后续绘制
+    uint8_t itemCount = wEui_list_getItemCount();
+    uint8_t topIndex = wEui_list_getTopIndex();
+    uint8_t cursorPos = wEui_list_getCursorPosition();
+
+    if (itemCount == 0) {
+        // 空列表时显示中文占位提示
+        g_display->setDrawColor(1);
+        g_display->setFont(g_displayConfig.font);
+        const char* emptyMsg = "空";
+        int msgWidth = g_display->getStrWidth(emptyMsg);
+        g_display->setCursor((g_displayConfig.width - msgWidth) / 2,
+                          (contentMaxHeight - g_displayConfig.lineHeight) / 2);
+        g_display->print(emptyMsg);
+    } else {
+        // 绘制带滚动条的列表区域
+        uint8_t scrollbarX = g_displayConfig.width - WEUI_SCROLLBAR_WIDTH;
+        uint8_t contentAreaWidth = g_displayConfig.width - WEUI_SCROLLBAR_WIDTH - 2;
+
+        g_display->setDrawColor(1);
+        g_display->drawFrame(0, 0, contentAreaWidth, contentMaxHeight);
+
+        wEui_list_renderScrollbar(g_display, scrollbarX, 0, WEUI_SCROLLBAR_WIDTH, contentMaxHeight);
+
+        uint8_t contentX = 2;
+        uint8_t contentY = 2;
+        uint8_t contentWidth = contentAreaWidth - 4;
+
+        g_display->setFont(g_displayConfig.font);
+
+        uint8_t maxVisibleItems = g_actualVisibleLines;
+
+        for (uint8_t i = 0; i < maxVisibleItems && (topIndex + i) < itemCount; i++) {
+            uint8_t itemIndex = topIndex + i;
+            uint8_t yPos = contentY + (i * g_displayConfig.lineHeight);
+
+            if (yPos + g_displayConfig.lineHeight > contentMaxHeight - 2) {
+                break;
+            }
+
+            bool isSelected = (i == cursorPos);
+
+            if (isSelected) {
+                // 选中项用背景和箭头高亮
+                g_display->setDrawColor(1);
+                g_display->drawBox(contentX, yPos - 1,
+                                  contentWidth, g_displayConfig.lineHeight);
+
+                g_display->setDrawColor(0);
+                g_display->setCursor(contentX + 1, yPos);
+                g_display->print(">");
+            } else {
+                g_display->setDrawColor(1);
+            }
+
+            const char* itemName = wEui_list_getItemName(itemIndex);
+            if (itemName && strlen(itemName) > 0) {
+                g_display->setCursor(contentX + 8, yPos);
+                g_display->print(itemName);
+            }
+
+            g_display->setDrawColor(1);
+        }
+    }
+}
+
 int wEui_render(void) {
     if (!g_wEui_initialized || g_display == NULL) {
         return -1;
@@ -142,21 +231,14 @@ int wEui_render(void) {
 
     g_display->clearBuffer();
 
-    // Get list state
-    uint8_t itemCount = wEui_list_getItemCount();
-    uint8_t topIndex = wEui_list_getTopIndex();
-    uint8_t cursorPos = wEui_list_getCursorPosition();
-
-    // Status bar is always enabled, reserve space for it
+    // 为状态栏预留底部高度空间
     uint8_t statusBarHeight = wEui_statusBar_getHeight();
     uint8_t contentMaxHeight = g_displayConfig.height - statusBarHeight;
 
-    // Calculate actual visible lines based on content height
-    // Account for border (4 pixels total: 2 top + 2 bottom)
+    // 根据可用高度计算实际可见行数，确保不超过最大值
     uint8_t availableContentHeight = contentMaxHeight - 4;
     g_actualVisibleLines = availableContentHeight / g_displayConfig.lineHeight;
 
-    // Ensure at least 1 line is visible and not more than WEUI_VISIBLE_LINES
     if (g_actualVisibleLines == 0) {
         g_actualVisibleLines = 1;
     }
@@ -164,81 +246,31 @@ int wEui_render(void) {
         g_actualVisibleLines = WEUI_VISIBLE_LINES;
     }
 
-    if (itemCount == 0) {
-        // Show empty list message in Chinese
+    // 获取当前页面信息
+    int currentPageId = -1;
+    wEui_PageType_t pageType = WEUI_PAGE_TYPE_LIST;
+
+    if (wEui_page_getCurrentRenderInfo(&currentPageId, &pageType) == 0 && currentPageId >= 0) {
+        // 渲染当前活动页面
+        if (pageType == WEUI_PAGE_TYPE_LIST) {
+            // 渲染列表页面（使用现有的列表渲染逻辑）
+            wEui_render_listPage(contentMaxHeight);
+        } else if (pageType == WEUI_PAGE_TYPE_CUSTOM) {
+            // 渲染自定义页面
+            wEui_page_renderCustom(currentPageId, g_display, &g_displayConfig, contentMaxHeight);
+        }
+    } else {
+        // 没有活动页面时显示默认内容
         g_display->setDrawColor(1);
-        g_display->setFont(g_displayConfig.font);  // Ensure font is set
-        const char* emptyMsg = "空";
-        int msgWidth = g_display->getStrWidth(emptyMsg);
+        g_display->setFont(g_displayConfig.font);
+        const char* noPageMsg = "无页面";
+        int msgWidth = g_display->getStrWidth(noPageMsg);
         g_display->setCursor((g_displayConfig.width - msgWidth) / 2,
                           (contentMaxHeight - g_displayConfig.lineHeight) / 2);
-        g_display->print(emptyMsg);
-    } else {
-        // Calculate scrollbar area
-        uint8_t scrollbarX = g_displayConfig.width - WEUI_SCROLLBAR_WIDTH;
-        uint8_t contentAreaWidth = g_displayConfig.width - WEUI_SCROLLBAR_WIDTH - 2;
-
-        // Draw list border/frame (excluding scrollbar area)
-        g_display->setDrawColor(1);
-        g_display->drawFrame(0, 0, contentAreaWidth, contentMaxHeight);
-
-        // Draw scrollbar
-        wEui_list_renderScrollbar(g_display, scrollbarX, 0, WEUI_SCROLLBAR_WIDTH, contentMaxHeight);
-
-        // Calculate content area
-        uint8_t contentX = 2;
-        uint8_t contentY = 2;
-        uint8_t contentWidth = contentAreaWidth - 4;
-
-        // Ensure font is set for text rendering
-        g_display->setFont(g_displayConfig.font);
-
-        // Use actual visible lines calculated above
-        uint8_t maxVisibleItems = g_actualVisibleLines;
-
-        // Render list items with enhanced visuals
-        for (uint8_t i = 0; i < maxVisibleItems && (topIndex + i) < itemCount; i++) {
-            uint8_t itemIndex = topIndex + i;
-            uint8_t yPos = contentY + (i * g_displayConfig.lineHeight);
-
-            // Ensure we don't draw beyond content area
-            if (yPos + g_displayConfig.lineHeight > contentMaxHeight - 2) {
-                break;
-            }
-
-            // Check if this is the selected item
-            bool isSelected = (i == cursorPos);
-
-            if (isSelected) {
-                // Draw selection background box
-                g_display->setDrawColor(1);
-                g_display->drawBox(contentX, yPos - 1,
-                                  contentWidth, g_displayConfig.lineHeight);
-
-                // Switch to inverse color for selected item text
-                g_display->setDrawColor(0);
-
-                // Draw selection arrow/indicator
-                g_display->setCursor(contentX + 1, yPos);
-                g_display->print(">");
-            } else {
-                // Normal item - ensure normal drawing color
-                g_display->setDrawColor(1);
-            }
-
-            // Draw item name with proper offset
-            const char* itemName = wEui_list_getItemName(itemIndex);
-            if (itemName && strlen(itemName) > 0) {
-                g_display->setCursor(contentX + 8, yPos);
-                g_display->print(itemName);
-            }
-
-            // Reset draw color for next iteration
-            g_display->setDrawColor(1);
-        }
+        g_display->print(noPageMsg);
     }
 
-    // Always render status bar at bottom
+    // 状态栏始终在底部渲染
     wEui_statusBar_render(g_display, &g_displayConfig);
 
     return 0;
@@ -265,7 +297,7 @@ int wEui_processButtonEvents(uint32_t timeout) {
     const char* receivedBtn;
     if (xQueueReceive(g_buttonQueue, &receivedBtn, timeout) == pdPASS) {
 
-        // Check for long press events (if implemented in button handler)
+        // 检查是否为长按事件
         if (strstr(receivedBtn, "LONG_") == receivedBtn) {
             // Handle long press events
             if (strcmp(receivedBtn, "LONG_UP") == 0) {
@@ -278,7 +310,7 @@ int wEui_processButtonEvents(uint32_t timeout) {
                 wEui_list_moveToLast(); // Long Back goes to last item
             }
         } else {
-            // Handle normal button presses
+            // 处理普通按键事件
             if (strcmp(receivedBtn, "UP") == 0) {
                 wEui_list_moveUp();
             } else if (strcmp(receivedBtn, "DOWN") == 0) {
@@ -297,7 +329,7 @@ int wEui_processButtonEvents(uint32_t timeout) {
 }
 
 void wEui_setDefaultButtonHandlers(void) {
-    // Default handlers are implemented in processButtonEvents
+    // 当前默认处理由 processButtonEvents 统一管理，留作未来扩展
     // This function is for future extensibility
 }
 
@@ -321,6 +353,7 @@ void wEui_setFont(const uint8_t *font) {
 }
 
 uint8_t wEui_list_getActualVisibleLines(void) {
+    // 返回根据当前布局计算出来的实际可见行数
     return g_actualVisibleLines;
 }
 
