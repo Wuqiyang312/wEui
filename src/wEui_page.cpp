@@ -42,7 +42,7 @@ int wEui_page_init(void) {
 
     // 创建互斥量保护页面数据
     g_pageManager.mutex = xSemaphoreCreateMutex();
-    if (g_pageManager.mutex == NULL) {
+    if (g_pageManager.mutex == nullptr) {
         return -1;
     }
 
@@ -58,11 +58,11 @@ int wEui_page_init(void) {
 }
 
 int wEui_page_createList(const char *pageName) {
-    if (!g_pageInitialized || pageName == NULL || g_pageManager.pageCount >= WEUI_MAX_PAGES) {
+    if (!g_pageInitialized || pageName == nullptr || g_pageManager.pageCount >= WEUI_MAX_PAGES) {
         return -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, portMAX_DELAY);
     }
 
@@ -73,12 +73,15 @@ int wEui_page_createList(const char *pageName) {
     strncpy(page->name, pageName, WEUI_PAGE_NAME_LENGTH - 1);
     page->name[WEUI_PAGE_NAME_LENGTH - 1] = '\0';
     page->type = WEUI_PAGE_TYPE_LIST;
-    page->data.listPage.reserved = 0;
     page->visible = false;
+
+    // 创建关联的列表数据
+    int8_t listIndex = wEui_list_createListData();
+    page->data.listPage.listDataIndex = listIndex;
 
     g_pageManager.pageCount++;
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
 
@@ -86,12 +89,12 @@ int wEui_page_createList(const char *pageName) {
 }
 
 int wEui_page_createCustom(const char *pageName, wEui_CustomPageRender_t renderCallback) {
-    if (!g_pageInitialized || pageName == NULL || renderCallback == NULL ||
+    if (!g_pageInitialized || pageName == nullptr || renderCallback == nullptr ||
         g_pageManager.pageCount >= WEUI_MAX_PAGES) {
         return -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, portMAX_DELAY);
     }
 
@@ -107,7 +110,7 @@ int wEui_page_createCustom(const char *pageName, wEui_CustomPageRender_t renderC
 
     g_pageManager.pageCount++;
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
 
@@ -120,7 +123,7 @@ int wEui_page_push(int pageId) {
         return -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, portMAX_DELAY);
     }
 
@@ -135,8 +138,17 @@ int wEui_page_push(int pageId) {
     g_pageManager.currentPageId = pageId;
     g_pageManager.pages[pageId].visible = true;
 
-    if (g_pageManager.mutex != NULL) {
+    // 如果是列表页面，自动切换列表上下文
+    wEui_PageType_t pageType = g_pageManager.pages[pageId].type;
+    int8_t listDataIndex = g_pageManager.pages[pageId].data.listPage.listDataIndex;
+
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
+    }
+
+    // 切换列表上下文（在释放互斥量后执行，避免死锁）
+    if (pageType == WEUI_PAGE_TYPE_LIST && listDataIndex >= 0) {
+        wEui_list_switchContext(listDataIndex);
     }
 
     return 0;
@@ -147,7 +159,7 @@ int wEui_page_pop(void) {
         return -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, portMAX_DELAY);
     }
 
@@ -161,15 +173,29 @@ int wEui_page_pop(void) {
     g_pageManager.pageStack[g_pageManager.stackDepth] = -1;
 
     // 设置新的当前页面
+    wEui_PageType_t pageType = WEUI_PAGE_TYPE_LIST;
+    int8_t listDataIndex = -1;
+
     if (g_pageManager.stackDepth > 0) {
         g_pageManager.currentPageId = g_pageManager.pageStack[g_pageManager.stackDepth - 1];
         g_pageManager.pages[g_pageManager.currentPageId].visible = true;
+
+        // 获取新当前页面的列表上下文
+        pageType = g_pageManager.pages[g_pageManager.currentPageId].type;
+        if (pageType == WEUI_PAGE_TYPE_LIST) {
+            listDataIndex = g_pageManager.pages[g_pageManager.currentPageId].data.listPage.listDataIndex;
+        }
     } else {
         g_pageManager.currentPageId = -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
+    }
+
+    // 切换列表上下文（在释放互斥量后执行，避免死锁）
+    if (pageType == WEUI_PAGE_TYPE_LIST && listDataIndex >= 0) {
+        wEui_list_switchContext(listDataIndex);
     }
 
     return 0;
@@ -180,11 +206,11 @@ int wEui_page_getCurrentId(void) {
         return -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, pdMS_TO_TICKS(10));
     }
     int currentId = g_pageManager.currentPageId;
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
     return currentId;
@@ -196,11 +222,11 @@ wEui_PageType_t wEui_page_getType(int pageId) {
     }
 
     wEui_PageType_t type;
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, pdMS_TO_TICKS(10));
     }
     type = g_pageManager.pages[pageId].type;
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
     return type;
@@ -213,14 +239,14 @@ const char* wEui_page_getName(int pageId) {
         return "";
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, pdMS_TO_TICKS(10));
     }
 
     strncpy(tempName, g_pageManager.pages[pageId].name, WEUI_PAGE_NAME_LENGTH - 1);
     tempName[WEUI_PAGE_NAME_LENGTH - 1] = '\0';
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
 
@@ -233,11 +259,11 @@ uint8_t wEui_page_getStackDepth(void) {
     }
 
     uint8_t depth = 0;
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, pdMS_TO_TICKS(10));
     }
     depth = g_pageManager.stackDepth;
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
     return depth;
@@ -248,13 +274,14 @@ int wEui_page_switchListContext(int pageId) {
         return -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, pdMS_TO_TICKS(10));
     }
 
     wEui_PageType_t pageType = g_pageManager.pages[pageId].type;
+    int8_t listDataIndex = g_pageManager.pages[pageId].data.listPage.listDataIndex;
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
 
@@ -263,8 +290,8 @@ int wEui_page_switchListContext(int pageId) {
         return -2;
     }
 
-    // TODO: 在未来版本中，这里可以实现每个页面独立的列表数据
-    // 目前使用全局列表数据，所以这个函数主要是为了兼容性
+    // 切换到该页面关联的列表数据
+    wEui_list_switchContext(listDataIndex);
     return 0;
 }
 
@@ -281,13 +308,13 @@ int wEui_page_switchListContext(int pageId) {
  * @return 0成功，负数失败
  */
 int wEui_page_renderCustom(int pageId, U8G2 *display, const wEui_DisplayConfig_t *displayConfig, uint8_t contentHeight) {
-    if (!g_pageInitialized || !wEui_page_isValidId(pageId) || display == NULL || displayConfig == NULL) {
+    if (!g_pageInitialized || !wEui_page_isValidId(pageId) || display == nullptr || displayConfig == nullptr) {
         return -1;
     }
 
-    wEui_CustomPageRender_t renderCallback = NULL;
+    wEui_CustomPageRender_t renderCallback = nullptr;
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, pdMS_TO_TICKS(10));
     }
 
@@ -295,12 +322,12 @@ int wEui_page_renderCustom(int pageId, U8G2 *display, const wEui_DisplayConfig_t
         renderCallback = g_pageManager.pages[pageId].data.customPage.renderCallback;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
 
     // 执行自定义渲染回调
-    if (renderCallback != NULL) {
+    if (renderCallback != nullptr) {
         renderCallback(display, displayConfig, contentHeight);
         return 0;
     }
@@ -315,11 +342,11 @@ int wEui_page_renderCustom(int pageId, U8G2 *display, const wEui_DisplayConfig_t
  * @return 0成功，负数失败
  */
 int wEui_page_getCurrentRenderInfo(int *currentPageId, wEui_PageType_t *pageType) {
-    if (!g_pageInitialized || currentPageId == NULL || pageType == NULL) {
+    if (!g_pageInitialized || currentPageId == nullptr || pageType == nullptr) {
         return -1;
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreTake(g_pageManager.mutex, pdMS_TO_TICKS(10));
     }
 
@@ -331,7 +358,7 @@ int wEui_page_getCurrentRenderInfo(int *currentPageId, wEui_PageType_t *pageType
         *pageType = WEUI_PAGE_TYPE_LIST; // Default fallback
     }
 
-    if (g_pageManager.mutex != NULL) {
+    if (g_pageManager.mutex != nullptr) {
         xSemaphoreGive(g_pageManager.mutex);
     }
 

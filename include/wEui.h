@@ -76,9 +76,8 @@ typedef struct {
     wEui_PageType_t type;
     union {
         struct {
-            // List page specific data is managed globally for now
-            // Future enhancement could move list data here
-            uint8_t reserved;
+            // 列表页面数据索引，用于关联独立的列表数据
+            int8_t listDataIndex;
         } listPage;
         struct {
             wEui_CustomPageRender_t renderCallback;
@@ -89,6 +88,7 @@ typedef struct {
 
 // Include statusbar header after DisplayConfig is defined
 #include "wEui_statusbar.h"
+#include "wEui_toast.h"
 
 /**
  * @brief Button types supported by wEui
@@ -252,6 +252,24 @@ int wEui_page_switchListContext(int pageId);
 // ============================================================================
 // List Management Functions
 // ============================================================================
+
+/**
+ * @brief Create a new list data storage
+ * @return List data index on success, negative on failure
+ */
+int8_t wEui_list_createListData(void);
+
+/**
+ * @brief Switch to a specific list context
+ * @param listIndex List data index to switch to
+ */
+void wEui_list_switchContext(int8_t listIndex);
+
+/**
+ * @brief Get current active list index
+ * @return Current list index
+ */
+int8_t wEui_list_getCurrentListIndex(void);
 
 /**
  * @brief Add an item to the list

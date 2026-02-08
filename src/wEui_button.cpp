@@ -18,10 +18,10 @@ static uint8_t g_buttonLastStates[WEUI_BUTTON_COUNT] = {1, 1, 1, 1};
 // 上一次的电平状态，用于抓取下降沿按下事件
 
 // Button event callbacks
-static wEui_ButtonCallback_t g_buttonCallbacks[WEUI_BUTTON_COUNT] = {NULL};
+static wEui_ButtonCallback_t g_buttonCallbacks[WEUI_BUTTON_COUNT] = {nullptr};
 
 // Button queue for event messaging
-static QueueHandle_t g_buttonQueue = NULL;
+static QueueHandle_t g_buttonQueue = nullptr;
 // 事件队列供默认处理器向上层传递按键事件
 
 // Initialization flag
@@ -46,7 +46,7 @@ static inline uint8_t wEui_button_readGpio(uint8_t pin) {
  * @param button Button that was pressed
  */
 static void wEui_button_defaultHandler(wEui_ButtonType_t button) {
-    const char* btnName = NULL;
+    const char* btnName = nullptr;
 
     // 将按键类型转换为字符串并打印
     switch (button) {
@@ -71,7 +71,7 @@ static void wEui_button_defaultHandler(wEui_ButtonType_t button) {
     }
 
     // 将事件推送到队列供 wEui_core 处理
-    if (btnName != NULL && g_buttonQueue != NULL) {
+    if (btnName != nullptr && g_buttonQueue != nullptr) {
         xQueueSend(g_buttonQueue, &btnName, 0);
     }
 }
@@ -112,7 +112,7 @@ int wEui_button_deinit(void) {
 
     // Clear callbacks
     for (int i = 0; i < WEUI_BUTTON_COUNT; i++) {
-        g_buttonCallbacks[i] = NULL;
+        g_buttonCallbacks[i] = nullptr;
     }
 
     g_buttonInitialized = false;
@@ -120,7 +120,7 @@ int wEui_button_deinit(void) {
 }
 
 int wEui_button_setPinConfig(const wEui_ButtonConfig_t *config) {
-    if (config == NULL) {
+    if (config == nullptr) {
         return -1;
     }
 
@@ -157,7 +157,7 @@ int wEui_button_scan(void) {
         // Detect falling edge (button press): HIGH to LOW transition
         if (g_buttonLastStates[i] == 1 && currentState == 0) {
             // Button pressed event
-            if (g_buttonCallbacks[i] != NULL) {
+            if (g_buttonCallbacks[i] != nullptr) {
                 g_buttonCallbacks[i]((wEui_ButtonType_t)i);
             }
         }
