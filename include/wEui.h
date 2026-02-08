@@ -15,7 +15,7 @@
  * featuring list management, button handling, and display rendering.
  *
  * @author Wuqiyang312
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 // ============================================================================
@@ -123,13 +123,78 @@ typedef struct {
 
 
 /**
- * @brief Button pin configuration structure
+ * @brief Button pull mode configuration
+ */
+typedef enum {
+    WEUI_BUTTON_PULL_DOWN = 0,      // 默认下拉检测 (按下时为HIGH)
+    WEUI_BUTTON_PULL_UP = 1,        // 上拉检测 (按下时为LOW)
+    WEUI_BUTTON_FLOATING_RISE = 2,  // 实验性：悬空输入检测电压上升 (LOW到HIGH)
+    WEUI_BUTTON_FLOATING_FALL = 3,  // 实验性：悬空输入检测电压下降 (HIGH到LOW)
+    WEUI_BUTTON_ADC_SHARED = 4      // ADC模式：一个GPIO通过不同电压范围检测多个按键
+} wEui_ButtonPullMode_t;
+
+/**
+ * @brief ADC button range configuration for shared GPIO
  */
 typedef struct {
-    uint8_t upPin;
-    uint8_t downPin;
-    uint8_t okPin;
-    uint8_t backPin;
+    uint16_t minValue;    // 最小ADC值
+    uint16_t maxValue;    // 最大ADC值
+} wEui_AdcButtonRange_t;
+
+/**
+ * @brief Invalid/unconfigured pin marker
+ * 未配置引脚标记 - 使用0xFF而不是0，因为GPIO0是有效的引脚
+ */
+#define WEUI_PIN_INVALID 0xFF
+
+/**
+ * @brief Single button configuration (supports both GPIO and ADC mode)
+ * 单个按钮配置，支持GPIO模式和ADC模式
+ */
+typedef struct {
+    uint8_t pin;                      // GPIO引脚号 (WEUI_PIN_INVALID表示未配置)
+    wEui_ButtonPullMode_t pullMode;   // 拉模式/ADC模式
+    wEui_AdcButtonRange_t adcRange;   // ADC模式时的电压范围
+} wEui_SingleButtonConfig_t;
+
+/**
+ * @brief ADC group configuration for shared pins
+ * ADC组配置（共享同一引脚的按钮组）
+ */
+typedef struct {
+    uint8_t adcPin;           // ADC共享引脚
+    uint16_t debounceMs;      // 防抖动延时（毫秒）
+    uint16_t adcResolution;   // ADC分辨率 (例如: 4095 for 12-bit)
+    uint8_t buttonMask;       // 哪些按钮使用此ADC引脚 (位掩码)
+} wEui_AdcGroupConfig_t;
+
+// 最大支持的ADC组数量（不同的ADC引脚）
+#define WEUI_MAX_ADC_GROUPS 4
+
+/**
+ * @brief Button pin configuration structure
+ * 按钮配置结构体 - 支持混合模式
+ *
+ * 使用示例:
+ * 1. 所有按钮独立GPIO:
+ *    buttons[WEUI_BUTTON_UP] = {.pin = 5, .pullMode = WEUI_BUTTON_PULL_UP};
+ *    buttons[WEUI_BUTTON_DOWN] = {.pin = 6, .pullMode = WEUI_BUTTON_PULL_UP};
+ *
+ * 2. 部分按钮共享ADC:
+ *    buttons[WEUI_BUTTON_UP] = {.pin = 34, .pullMode = WEUI_BUTTON_ADC_SHARED, .adcRange = {100, 500}};
+ *    buttons[WEUI_BUTTON_DOWN] = {.pin = 34, .pullMode = WEUI_BUTTON_ADC_SHARED, .adcRange = {600, 1000}};
+ *    buttons[WEUI_BUTTON_OK] = {.pin = 7, .pullMode = WEUI_BUTTON_PULL_UP};  // 独立GPIO
+ *
+ * 3. 多个ADC组:
+ *    buttons[WEUI_BUTTON_UP] = {.pin = 34, .pullMode = WEUI_BUTTON_ADC_SHARED, .adcRange = {100, 500}};
+ *    buttons[WEUI_BUTTON_DOWN] = {.pin = 34, .pullMode = WEUI_BUTTON_ADC_SHARED, .adcRange = {600, 1000}};
+ *    buttons[WEUI_BUTTON_OK] = {.pin = 35, .pullMode = WEUI_BUTTON_ADC_SHARED, .adcRange = {200, 600}};
+ *    buttons[WEUI_BUTTON_BACK] = {.pin = 35, .pullMode = WEUI_BUTTON_ADC_SHARED, .adcRange = {700, 1100}};
+ */
+typedef struct {
+    wEui_SingleButtonConfig_t buttons[WEUI_BUTTON_COUNT];  // 每个按钮的独立配置
+    uint16_t debounceMs;      // ADC防抖动延时（毫秒），默认50ms
+    uint16_t adcResolution;   // ADC分辨率 (例如: 4095 for 12-bit)
 } wEui_ButtonConfig_t;
 
 /**
@@ -420,6 +485,31 @@ uint8_t wEui_button_read(wEui_ButtonType_t button);
  * @return 0 on success, negative on error
  */
 int wEui_button_setPinConfig(const wEui_ButtonConfig_t *config);
+
+/**
+ * @brief Read ADC value and detect button press (scans all ADC groups)
+ * @return Detected button type, WEUI_BUTTON_COUNT if no button detected
+ */
+wEui_ButtonType_t wEui_button_scanAdc(void);
+
+/**
+ * @brief Get current ADC reading for a specific pin (for debugging/calibration)
+ * @param pin GPIO pin to read ADC value from
+ * @return Current ADC value
+ */
+uint16_t wEui_button_readAdcValue(uint8_t pin);
+
+/**
+ * @brief Check if any button uses ADC mode
+ * @return true if any ADC mode is enabled
+ */
+bool wEui_button_isAdcModeEnabled(void);
+
+/**
+ * @brief Get ADC group count
+ * @return Number of unique ADC pins configured
+ */
+uint8_t wEui_button_getAdcGroupCount(void);
 
 /**
  * @brief Initialize list management with mutex

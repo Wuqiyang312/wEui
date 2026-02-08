@@ -363,8 +363,10 @@ int wEui_processButtonEvents(uint32_t timeout) {
             } else if (strcmp(receivedBtn, "OK") == 0) {
                 wEui_list_executeSelected();
             } else if (strcmp(receivedBtn, "BACK") == 0) {
-                // Handle back button - can be customized
-                Serial.println("Back button pressed");
+                // 只有堆栈深度大于1时才执行返回（避免在主页面弹出）
+                if (wEui_page_getStackDepth() > 1) {
+                    wEui_page_pop();
+                }
             }
         }
         return 0;
